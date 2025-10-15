@@ -1,0 +1,4 @@
+filtered_species_with_all_indexes_di_tri_tetra_combined_Github_check.csv is the output file of 02_07_01_di_tri_tetra_mechanics_combine.py. Whatever file is fine as long as it contains the same species set used for the corresponding lifespan models.
+
+"busco_species_tree_tip_alternative_names.csv" is for tip name assignment corresponding to the phylogenetic tree.
+The tree "labelled_supertree_ottnames.tre" is the .tre file of Protostomia, downloaded from OpenTreeOfLife.

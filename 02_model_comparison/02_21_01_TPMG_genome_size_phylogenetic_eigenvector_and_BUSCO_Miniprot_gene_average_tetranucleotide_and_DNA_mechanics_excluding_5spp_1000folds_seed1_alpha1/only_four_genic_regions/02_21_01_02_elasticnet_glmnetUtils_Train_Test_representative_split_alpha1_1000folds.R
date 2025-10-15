@@ -1,0 +1,561 @@
+setwd("/Users/yuikikondo/Desktop/Github_code/protostome_lifespan_prediction_model/02_model_comparison/02_21_01_TPMG_genome_size_phylogenetic_eigenvector_and_BUSCO_Miniprot_gene_average_tetranucleotide_and_DNA_mechanics_excluding_5spp_1000folds_seed1_alpha1/only_four_genic_regions")
+
+# Load necessary libraries
+library(glmnet)       # For elastic net regression
+library(caret)        # For splitting data and cross-validation
+library(dplyr)        # For data manipulation
+library(tidyr)        # For data tidying
+library(ggplot2)      # For plotting
+library(glmnetUtils)  # For cva.glmnet
+
+# Step 1: Load the data
+data <- read.csv("filtered_species_with_zero_lifecycle_6_categories_each_region_wide_tetra_rate_and_di_tri_tetra_mechanics_with_eigenvectors_and_genome_size.csv", header = TRUE)
+
+
+data_definitive_test <- read.csv("data_definitive_test.csv", header = TRUE)
+data_definitive_train <- read.csv("data_definitive_train.csv", header = TRUE)
+
+
+# Remove columns
+columns_to_remove <- c("phylotree_tip_name", "Assembly.Identifier", "Phylum", "Class", "Order", 
+                       "Family", "Genus", "Eusociality.level", "Host.number")
+
+data <- data[, !(names(data) %in% columns_to_remove)]
+data_definitive_test <- data_definitive_test[, !(names(data) %in% columns_to_remove)]
+data_definitive_train <- data_definitive_train[, !(names(data) %in% columns_to_remove)]
+
+# Step 2: Order data alphabetically by Organism.Name
+data <- data[order(data$Organism.Name), ]
+# Rename Average_lifespan_days to "Lifespan"
+colnames(data)[colnames(data) == "Average_lifespan_days"] <- "Lifespan"
+colnames(data_definitive_test)[colnames(data_definitive_test) == "Average_lifespan_days"] <- "Lifespan"
+colnames(data_definitive_train)[colnames(data_definitive_train) == "Average_lifespan_days"] <- "Lifespan"
+
+# Step 2: Log-transform lifespan data
+data$log_lifespan <- log(data$Lifespan)
+
+data_definitive_test$log_lifespan <- log(data_definitive_test$Lifespan)
+data_definitive_train$log_lifespan <- log(data_definitive_train$Lifespan)
+
+
+# AFTER filtering into groups and removing lifecycle columns
+# subset only the gene-related columns
+data_definitive_test <- data_definitive_test %>%
+  select(Organism.Name, Lifespan, log_lifespan, ln_Genome_size, contains("_downstream2"), contains("_upstream2"), contains("_exon"), contains("_intron"), contains("eigenvector"))
+
+data_definitive_train <- data_definitive_train %>%
+  select(Organism.Name, Lifespan, log_lifespan, ln_Genome_size, contains("_downstream2"), contains("_upstream2"), contains("_exon"), contains("_intron"), contains("eigenvector"))
+
+
+
+# Step 3: Split the data into [70% training] and [30% (hold-out) testing] sets (already done.)
+set.seed(1)  # For reproducibility
+
+test_data <- data_definitive_test
+train_data <- data_definitive_train
+
+# Step 4: Initialize variables for cross-validation and final test set predictions
+outer_results <- list()
+fold_predictions <- matrix(NA, nrow = nrow(train_data), ncol = 1000)
+fold_predictions_final_test_set <- matrix(NA, nrow = nrow(test_data), ncol = 1000)  # For final [30% test] set predictions
+test_inclusion_counts <- rep(0, nrow(train_data))  # Tracks how many times each species is included in test data
+
+# Step 5: Perform 1000-fold cross-validation on the [70% training] data
+for (i in 1:999) {  # First 999 folds
+    # Create training and testing sets for each fold
+    fold_train_indices <- createDataPartition(train_data$log_lifespan, p = 0.7, list = FALSE)
+    fold_test_indices  <- setdiff(seq_len(nrow(train_data)), fold_train_indices)
+    fold_train_data    <- train_data[fold_train_indices, ]
+    fold_test_data     <- train_data[fold_test_indices, ]
+    
+    # Update test inclusion counts
+    test_inclusion_counts[fold_test_indices] <- test_inclusion_counts[fold_test_indices] + 1
+    
+    # Prepare predictor matrices and response vectors
+    x_train <- fold_train_data %>%
+        select(-c(Organism.Name, Lifespan, log_lifespan)) %>%
+        as.matrix()
+    y_train <- fold_train_data$log_lifespan
+    
+    x_test <- fold_test_data %>%
+        select(-c(Organism.Name, Lifespan, log_lifespan)) %>%
+        as.matrix()
+    y_test <- fold_test_data$log_lifespan
+    
+    # Ensure column names/order match between training and test sets
+    x_test <- x_test[, colnames(x_train), drop = FALSE]
+    
+    # Step 6: Use cva.glmnet for model selection
+    cva_model <- cva.glmnet(x_train, y_train, alpha = 1,
+                            family = "gaussian", nfolds = 10, nlambda = 100)
+    
+    # Track the best cv model across alphas
+    best_model <- NULL
+    best_lambda <- NULL
+    best_alpha <- NULL
+    best_cvm <- Inf
+    
+    for (idx in seq_along(cva_model$modlist)) {
+        mod <- cva_model$modlist[[idx]]        # cv.glmnet object
+        alpha_val <- cva_model$alpha[idx]
+        lambda_1se <- mod$lambda.1se
+        
+        # Choose the alpha whose cv curve has the smallest min(cvm)
+        if (min(mod$cvm) < best_cvm) {
+            best_cvm   <- min(mod$cvm)
+            best_model <- mod
+            best_lambda <- lambda_1se
+            best_alpha  <- alpha_val
+        }
+    }
+    
+    # Named coefficients (including intercept) for this fold
+    coefs_this_fold <- as.matrix(coef(best_model, s = best_lambda))
+    coef_vec_named  <- setNames(as.numeric(coefs_this_fold[, 1]),
+                                rownames(coefs_this_fold))
+    
+    # Step 7: Predict on training and test data using the best model
+    pred_train <- as.numeric(predict(best_model, newx = x_train, s = best_lambda))
+    pred_test  <- as.numeric(predict(best_model, newx  = x_test,  s = best_lambda))
+
+    train_mae_years <- mean(abs((exp(y_train) - exp(pred_train)) / 365), na.rm = TRUE)
+    test_mae_years  <- mean(abs((exp(y_test)  - exp(pred_test))  / 365), na.rm = TRUE)
+    
+    # Store the test predictions for this fold
+    fold_predictions[fold_test_indices, i] <- pred_test
+    
+    # Step 7.1: Predict on the final [30% test] data (never used in CV)
+    x_final_test <- test_data %>%
+        select(-c(Organism.Name, Lifespan, log_lifespan)) %>%
+        as.matrix()
+    # Align columns/order to training matrix
+    x_final_test <- x_final_test[, colnames(x_train), drop = FALSE]
+    
+    pred_final_test <- as.numeric(predict(best_model, newx = x_final_test, s = best_lambda))
+    fold_predictions_final_test_set[, i] <- pred_final_test
+    
+    # Store results for this fold
+    outer_results[[i]] <- list(
+        coef_vec   = coef_vec_named,                  # named coefficients (incl. "(Intercept)")
+        best_lambda = best_lambda,
+        best_alpha  = best_alpha,
+        train_corr  = cor(y_train, pred_train),
+        test_corr   = cor(y_test,  pred_test),
+        train_mse   = mean((y_train - pred_train)^2),
+        test_mse    = mean((y_test  - pred_test )^2),
+        train_mae_years = train_mae_years,
+        test_mae_years  = test_mae_years   
+    )
+}
+
+
+# Step 8: Handle the 1000th fold with priority to data points with test inclusion count of 0
+test_indices_priority <- which(test_inclusion_counts == 0)
+remaining_indices <- setdiff(seq_len(nrow(train_data)), test_indices_priority)
+
+# Size of the 1000th test set (same split ratio as other folds)
+test_size <- nrow(train_data) - floor(0.7 * nrow(train_data))
+
+# Build the 1000th fold's test indices
+if (length(test_indices_priority) < test_size) {
+    additional_test_needed <- test_size - length(test_indices_priority)
+    set.seed(1)  # keep reproducible
+    additional_test_indices <- sample(remaining_indices, size = additional_test_needed)
+    fold_test_indices <- c(test_indices_priority, additional_test_indices)
+} else {
+    fold_test_indices <- test_indices_priority
+}
+
+# Prepare the 1000th fold training and test sets
+fold_train_indices <- setdiff(seq_len(nrow(train_data)), fold_test_indices)
+fold_train_data <- train_data[fold_train_indices, ]
+fold_test_data  <- train_data[fold_test_indices, ]
+
+# Predictor matrices and response vectors
+x_train <- fold_train_data %>%
+    select(-c(Organism.Name, Lifespan, log_lifespan)) %>%
+    as.matrix()
+y_train <- fold_train_data$log_lifespan
+
+x_test <- fold_test_data %>%
+    select(-c(Organism.Name, Lifespan, log_lifespan)) %>%
+    as.matrix()
+y_test <- fold_test_data$log_lifespan
+
+# Ensure columns/order match between training and test sets
+x_test <- x_test[, colnames(x_train), drop = FALSE]
+
+# Step 9: Inner cross-validation for model selection (1000th fold) using cva.glmnet
+best_model  <- NULL
+best_lambda <- NULL
+best_alpha  <- NULL
+best_cvm    <- Inf
+
+cv_model <- cva.glmnet(x_train, y_train, alpha = 1,
+                       family = "gaussian", nfolds = 10, nlambda = 100)
+
+for (idx in seq_along(cv_model$modlist)) {
+    mod <- cv_model$modlist[[idx]]       # cv.glmnet object
+    alpha_val <- cv_model$alpha[idx]
+    lambda_1se <- mod$lambda.1se
+
+    if (min(mod$cvm) < best_cvm) {
+        best_cvm    <- min(mod$cvm)
+        best_model  <- mod
+        best_lambda <- lambda_1se
+        best_alpha  <- alpha_val
+    }
+}
+
+# Named coefficients (including intercept) for the 1000th fold
+coefs_this_fold <- as.matrix(coef(best_model, s = best_lambda))
+coef_vec_named  <- setNames(as.numeric(coefs_this_fold[, 1]),
+                            rownames(coefs_this_fold))
+
+# Step 10: Predict on training and test data for the 1000th fold
+pred_train <- as.numeric(predict(best_model, newx = x_train, s = best_lambda))
+pred_test  <- as.numeric(predict(best_model, newx  = x_test,  s = best_lambda))
+
+train_mae_years <- mean(abs((exp(y_train) - exp(pred_train)) / 365), na.rm = TRUE)
+test_mae_years  <- mean(abs((exp(y_test)  - exp(pred_test))  / 365), na.rm = TRUE)
+
+# Store the test predictions for the 1000th fold
+fold_predictions[fold_test_indices, 1000] <- pred_test
+
+# Step 10.1: Predict the final [30% test] set (align columns to x_train)
+x_final_test <- test_data %>%
+    select(-c(Organism.Name, Lifespan, log_lifespan)) %>%
+    as.matrix()
+x_final_test <- x_final_test[, colnames(x_train), drop = FALSE]
+
+pred_final_test <- as.numeric(predict(best_model, newx = x_final_test, s = best_lambda))
+fold_predictions_final_test_set[, 1000] <- pred_final_test
+
+# Step 10.2: Store the 1000th fold results in outer_results (with named coefs)
+outer_results[[1000]] <- list(
+    coef_vec   = coef_vec_named,     # named vector, includes "(Intercept)"
+    best_lambda = best_lambda,
+    best_alpha  = best_alpha,
+    train_corr  = cor(y_train, pred_train),
+    test_corr   = cor(y_test,  pred_test),
+    train_mse   = mean((y_train - pred_train)^2),
+    test_mse    = mean((y_test  - pred_test )^2),
+    train_mae_years = train_mae_years,
+    test_mae_years  = test_mae_years
+)
+
+
+# Step 11: Bagging predictions by averaging the fold predictions (for training data)
+bagging_predictions_train <- rowMeans(fold_predictions, na.rm = TRUE)
+
+# ===== Step 12: Build a name-safe coefficient table across folds =====
+
+# Union of all coefficient names across folds (keeps "(Intercept)")
+all_coef_names <- unique(unlist(lapply(outer_results, function(x) names(x$coef_vec))))
+
+# One row per coefficient name; one column per fold
+weight_df <- data.frame(Feature_Name = all_coef_names, stringsAsFactors = FALSE)
+
+for (i in seq_along(outer_results)) {
+  v <- outer_results[[i]]$coef_vec           # named vector incl. "(Intercept)"
+  # default to 0 for coefficients not present in this fold
+  weight_df[[paste0("Fold_", i)]] <- ifelse(all_coef_names %in% names(v), v[all_coef_names], 0)
+}
+
+# Average weight across folds (0 for unselected in a fold)
+fold_cols <- paste0("Fold_", seq_along(outer_results))
+weight_df$Average_Weight <- rowMeans(weight_df[, fold_cols, drop = FALSE], na.rm = TRUE)
+
+
+# ===== Step 13: Mean predictor value & correlations (all species + train-only) =====
+
+# Combine definitive train and test data (only species with lifespan values)
+data_definitive <- bind_rows(data_definitive_train, data_definitive_test) %>%
+  mutate(log_lifespan = log(Lifespan))   # Recalculate log_lifespan (no -Inf)
+
+# Predictor columns (exclude metadata)
+predictor_columns <- colnames(
+  data_definitive %>% select(-c(Organism.Name, Lifespan, log_lifespan))
+)
+
+# 1) Mean feature values across all definitive species
+mean_nucleotide_rate_values <- data_definitive %>%
+  select(all_of(predictor_columns)) %>%
+  summarize(across(everything(), ~ mean(as.numeric(.), na.rm = TRUE))) %>%
+  tidyr::gather(key = "Feature_Name", value = "Mean_Feature_Value_Across_All_Species")
+
+# 2) Correlations (all definitive species)
+correlations_all <- sapply(predictor_columns, function(g) {
+  cor(data_definitive$log_lifespan, as.numeric(data_definitive[[g]]), use = "complete.obs")
+})
+correlation_df_all <- data.frame(
+  Feature_Name = names(correlations_all),
+  Lifespan_Feature_Correlation_All_Species = correlations_all,
+  stringsAsFactors = FALSE
+)
+
+# 3) Correlations (train-only definitive species)
+data_definitive_train_only <- data_definitive_train %>%
+  select(any_of(c("Organism.Name", "Lifespan", predictor_columns))) %>%
+  mutate(log_lifespan = log(Lifespan))
+
+correlations_train <- sapply(predictor_columns, function(g) {
+  cor(data_definitive_train_only$log_lifespan,
+      as.numeric(data_definitive_train_only[[g]]),
+      use = "complete.obs")
+})
+correlation_df_train <- data.frame(
+  Feature_Name = names(correlations_train),
+  Lifespan_Feature_Correlation_Train_Species = correlations_train,
+  stringsAsFactors = FALSE
+)
+
+# ===== Step 14: Merge into combined_weights_df =====
+combined_weights_df <- weight_df %>%
+  dplyr::left_join(mean_nucleotide_rate_values, by = "Feature_Name") %>%
+  dplyr::left_join(correlation_df_all, by = "Feature_Name") %>%
+  dplyr::left_join(correlation_df_train, by = "Feature_Name")
+
+# (Optional) selection stability metrics remain the same
+combined_weights_df$Selection_Frequency <- rowMeans(combined_weights_df[, fold_cols] != 0, na.rm = TRUE)
+combined_weights_df$SD_Weight <- apply(combined_weights_df[, fold_cols, drop = FALSE], 1, sd)
+
+
+
+# ===== Step 15: Save combined model weights =====
+write.csv(combined_weights_df, "combined_model_weights.csv", row.names = FALSE)
+
+
+# ===== Step 16: Prepare final averaged weights (separate intercept) =====
+
+# Intercept from averaged coefficients (default 0 if missing)
+intercept <- combined_weights_df$Average_Weight[combined_weights_df$Feature_Name == "(Intercept)"]
+intercept <- ifelse(length(intercept) == 0, 0, as.numeric(intercept))
+
+# Final averaged coefficients for predictors only (drop intercept)
+final_coef_df <- combined_weights_df %>%
+  dplyr::filter(Feature_Name != "(Intercept)") %>%
+  dplyr::select(Feature_Name, Average_Weight)
+
+# Build train/test matrices and align columns to the coefficient names
+x_train_data <- train_data %>%
+  dplyr::select(-c(Organism.Name, Lifespan, log_lifespan)) %>%
+  as.matrix()
+
+x_test_data <- test_data %>%
+  dplyr::select(-c(Organism.Name, Lifespan, log_lifespan)) %>%
+  as.matrix()
+
+# Keep only predictors that exist in both matrix and final_coef_df; ensure same order
+keep_cols <- intersect(colnames(x_train_data), final_coef_df$Feature_Name)
+final_coef_df <- final_coef_df[match(keep_cols, final_coef_df$Feature_Name), , drop = FALSE]
+
+x_train_data_filtered <- x_train_data[, keep_cols, drop = FALSE]
+x_test_data_filtered  <- x_test_data[,  keep_cols, drop = FALSE]
+
+# Coefficient vector in matching order
+final_weights_filtered <- as.numeric(final_coef_df$Average_Weight)
+
+# Predictions (model averaging)
+predicted_log_lifespan_train <- as.numeric(intercept + x_train_data_filtered %*% final_weights_filtered)
+predicted_log_lifespan_test  <- as.numeric(intercept + x_test_data_filtered  %*% final_weights_filtered)
+
+
+# ===== Step 17–18: Create combined results for predictions and save =====
+
+train_results <- data.frame(
+  Organism_Name = train_data$Organism.Name,
+  Dataset = "Train",
+  Known_Log_Lifespan = train_data$log_lifespan,
+  Predicted_Log_Lifespan_Model_Averaging = predicted_log_lifespan_train,
+  Predicted_Log_Lifespan_Bagging = bagging_predictions_train
+)
+
+test_results <- data.frame(
+  Organism_Name = test_data$Organism.Name,
+  Dataset = "Test",
+  Known_Log_Lifespan = test_data$log_lifespan,
+  Predicted_Log_Lifespan_Model_Averaging = predicted_log_lifespan_test,
+  Predicted_Log_Lifespan_Bagging = NA  # will be filled later by final-test bagging
+)
+
+combined_results <- rbind(train_results, test_results)
+
+# ===== Step 19: Save initial predictions (will be augmented later) =====
+write.csv(combined_results, "log_lifespan_predictions.csv", row.names = FALSE)
+
+
+# ===== Step 25: Add per-fold predictions (train folds) to combined_results =====
+for (i in 1:ncol(fold_predictions)) {
+  combined_results[[paste0("Fold_", i, "_Prediction")]] <-
+    c(fold_predictions[, i], rep(NA, nrow(test_data)))
+}
+
+# ===== Step 26: Add per-fold predictions for the final [30% test] set =====
+for (i in 1:ncol(fold_predictions_final_test_set)) {
+  combined_results[[paste0("Fold_", i, "_Final_Test_Prediction")]] <-
+    c(rep(NA, nrow(train_data)), fold_predictions_final_test_set[, i])
+}
+
+# ===== Step 27: Bagging predictions for the final [30% test] set =====
+final_test_bagging_predictions <- rowMeans(fold_predictions_final_test_set, na.rm = TRUE)
+
+# ===== Step 28: Update test rows' bagging predictions =====
+combined_results$Predicted_Log_Lifespan_Bagging[(nrow(train_data) + 1):nrow(combined_results)] <-
+  final_test_bagging_predictions
+
+# ===== Step 29: Save the augmented predictions file =====
+write.csv(combined_results, "log_lifespan_predictions_with_folds.csv", row.names = FALSE)
+
+
+# ======================= METRICS (Step 20–22) =======================
+
+# --- Model-averaging metrics ---
+train_pearson_corr_model_avg <- cor(train_data$log_lifespan, predicted_log_lifespan_train, use = "complete.obs")
+train_mse_model_avg          <- mean((train_data$log_lifespan - predicted_log_lifespan_train)^2)
+train_mae_model_avg          <- mean(abs((exp(train_data$log_lifespan) - exp(predicted_log_lifespan_train)) / 365), na.rm = TRUE)
+
+test_pearson_corr_model_avg  <- cor(test_data$log_lifespan,  predicted_log_lifespan_test,  use = "complete.obs")
+test_mse_model_avg           <- mean((test_data$log_lifespan  - predicted_log_lifespan_test)^2)
+test_mae_model_avg           <- mean(abs((exp(test_data$log_lifespan) - exp(predicted_log_lifespan_test)) / 365), na.rm = TRUE)
+
+# --- Bagging metrics ---
+train_pearson_corr_bagging <- cor(train_data$log_lifespan, bagging_predictions_train, use = "complete.obs")
+train_mse_bagging          <- mean((train_data$log_lifespan - bagging_predictions_train)^2)
+train_mae_bagging          <- mean(abs((exp(train_data$log_lifespan) - exp(bagging_predictions_train)) / 365), na.rm = TRUE)
+
+test_pearson_corr_bagging  <- cor(test_data$log_lifespan, final_test_bagging_predictions, use = "complete.obs")
+test_mse_bagging           <- mean((test_data$log_lifespan  - final_test_bagging_predictions)^2)
+test_mae_bagging           <- mean(abs((exp(test_data$log_lifespan) - exp(final_test_bagging_predictions)) / 365), na.rm = TRUE)
+
+
+# --- Per-fold metrics table from outer_results ---
+per_fold <- data.frame(
+  Fold             = paste0("Fold_", seq_along(outer_results)),
+  Train_Pearson_Corr = sapply(outer_results, function(x) x$train_corr),
+  Test_Pearson_Corr  = sapply(outer_results, function(x) x$test_corr),
+  Train_MSE          = sapply(outer_results, function(x) x$train_mse),
+  Test_MSE           = sapply(outer_results, function(x) x$test_mse),
+  Train_MAE          = sapply(outer_results, function(x) x$train_mae_years),  # years
+  Test_MAE           = sapply(outer_results, function(x) x$test_mae_years),   # years
+  Alpha              = sapply(outer_results, function(x) x$best_alpha),
+  Lambda             = sapply(outer_results, function(x) x$best_lambda),
+  Num_Features       = sapply(outer_results, function(x) {
+    v <- x$coef_vec
+    sum(v[names(v) != "(Intercept)"] != 0)
+  })
+)
+
+
+# --- Summary rows ---
+final_model_row_train_avg <- data.frame(
+  Fold = "70%_Train_Data_Model_Averaging",
+  Train_Pearson_Corr = train_pearson_corr_model_avg,
+  Test_Pearson_Corr  = NA,
+  Train_MSE          = train_mse_model_avg,
+  Test_MSE           = NA,
+  Train_MAE          = train_mae_model_avg,
+  Test_MAE           = NA,
+  Alpha              = NA,
+  Lambda             = NA,
+  Num_Features       = sum(
+    (combined_weights_df$Feature_Name != "(Intercept)") &
+    (combined_weights_df$Average_Weight != 0),
+    na.rm = TRUE
+  )
+)
+
+final_model_row_test_avg <- data.frame(
+  Fold = "30%_Holdout_Test_Data_Model_Averaging",
+  Train_Pearson_Corr = NA,
+  Test_Pearson_Corr  = test_pearson_corr_model_avg,
+  Train_MSE          = NA,
+  Test_MSE           = test_mse_model_avg,
+  Train_MAE          = NA,
+  Test_MAE           = test_mae_model_avg,
+  Alpha              = NA,
+  Lambda             = NA,
+  Num_Features       = final_model_row_train_avg$Num_Features
+)
+
+final_model_row_train_bagging <- data.frame(
+  Fold = "70%_Train_Data_Bagging_(test_data_in_each_fold)",
+  Train_Pearson_Corr = NA,
+  Test_Pearson_Corr  = train_pearson_corr_bagging,
+  Train_MSE          = NA,
+  Test_MSE           = train_mse_bagging,
+  Train_MAE          = NA,
+  Test_MAE           = train_mae_bagging,
+  Alpha              = NA,
+  Lambda             = NA,
+  Num_Features       = NA
+)
+
+final_model_row_test_bagging <- data.frame(
+  Fold = "30%_Holdout_Test_Data_Bagging",
+  Train_Pearson_Corr = NA,
+  Test_Pearson_Corr  = test_pearson_corr_bagging,
+  Train_MSE          = NA,
+  Test_MSE           = test_mse_bagging,
+  Train_MAE          = NA,
+  Test_MAE           = test_mae_bagging,
+  Alpha              = NA,
+  Lambda             = NA,
+  Num_Features       = NA
+)
+
+
+
+model_metrics <- rbind(
+  per_fold,
+  final_model_row_train_avg,
+  final_model_row_test_avg,
+  final_model_row_train_bagging,
+  final_model_row_test_bagging
+)
+
+write.csv(model_metrics, "model_metrics.csv", row.names = FALSE)
+
+
+# Step 23: Combine training and test results for plotting
+plot_data <- rbind(
+    data.frame(
+        Organism_Name = train_data$Organism.Name,
+        Known_Log_Lifespan = train_data$log_lifespan,
+        Predicted_Log_Lifespan = predicted_log_lifespan_train,
+        Set = "Train"
+    ),
+    data.frame(
+        Organism_Name = test_data$Organism.Name,
+        Known_Log_Lifespan = test_data$log_lifespan,
+        Predicted_Log_Lifespan = predicted_log_lifespan_test,
+        Set = "Test"
+    )
+)
+
+# Step 24: Create the scatter plot using ggplot2
+p <- ggplot(plot_data, aes(x = Known_Log_Lifespan, y = Predicted_Log_Lifespan, color = Set)) +
+    geom_point(alpha = 0.7, size = 3) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black") +
+    labs(title = "Scatterplot of Known vs Predicted Log Lifespan",
+         x = "Known Log Lifespan",
+         y = "Predicted Log Lifespan") +
+    theme_minimal() +
+    theme(
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 12)
+    ) +
+    scale_color_manual(values = c("Train" = "blue", "Test" = "red"))
+
+# Display in RStudio's Plots pane
+print(p)
+
+# Save to file
+ggsave("scatterplot_lifespan.png", plot = p, width = 8, height = 6, dpi = 300)
+
+
+
+################################################################################

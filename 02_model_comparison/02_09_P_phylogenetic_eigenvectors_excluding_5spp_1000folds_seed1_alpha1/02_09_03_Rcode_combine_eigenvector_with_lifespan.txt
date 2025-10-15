@@ -1,0 +1,61 @@
+# Purpose: Construct a dataset that includes only species with available lifespan data, matched to their phylogenetic eigenvectors, and append requested metadata columns.
+
+library(dplyr)
+
+# ---- Inputs ----
+eigenvector_data <- read.csv("eigenvector_matrix.csv", row.names = 1)
+species_lifespan <- read.csv("filtered_species_with_tip_name_di_tri_tetra_mechanics_Github_check.csv")
+
+# Columns to append from species_lifespan
+required_cols <- c(
+  "Assembly.Identifier", "Phylum", "Class", "Order",
+  "Family", "Genus", "Organism.Name", "Eusociality.level", "Host.number"
+)
+
+# ---- Validation ----
+missing_cols <- setdiff(required_cols, names(species_lifespan))
+if (length(missing_cols) > 0) {
+  stop(sprintf(
+    "The following required columns are missing in species_lifespan: %s",
+    paste(missing_cols, collapse = ", ")
+  ))
+}
+if (!("Tip_Name" %in% names(species_lifespan))) {
+  stop("Column 'Tip_Name' is missing in species_lifespan.")
+}
+if (!("Average_lifespan_days" %in% names(species_lifespan))) {
+  stop("Column 'Average_lifespan_days' is missing in species_lifespan.")
+}
+
+# ---- Filter to species with lifespan ----
+eigenvector_data <- eigenvector_data[rownames(eigenvector_data) %in% species_lifespan$Tip_Name, , drop = FALSE]
+
+# Align outcome and metadata to the eigenvector row order
+match_idx <- match(rownames(eigenvector_data), species_lifespan$Tip_Name)
+
+Average_lifespan_days <- species_lifespan$Average_lifespan_days[match_idx]
+
+# Drop any rows where lifespan is NA (and keep everything aligned)
+keep <- !is.na(Average_lifespan_days)
+eigenvector_data <- eigenvector_data[keep, , drop = FALSE]
+Average_lifespan_days <- Average_lifespan_days[keep]
+match_idx <- match_idx[keep]
+
+# Pull requested metadata in the aligned order
+meta_cols <- species_lifespan[match_idx, required_cols, drop = FALSE]
+
+# ---- Tidy names and combine ----
+colnames(eigenvector_data) <- paste0("eigenvector_", seq_len(ncol(eigenvector_data)))
+
+final_dataset <- data.frame(
+  phylotree_tip_name = rownames(eigenvector_data),
+  meta_cols,
+  eigenvector_data,
+  Average_lifespan_days = Average_lifespan_days,
+  row.names = NULL,
+  check.names = FALSE
+)
+
+# ---- Output ----
+write.csv(final_dataset, "phylo_eigenvectors_with_lifespan.csv", row.names = FALSE)
+print("Final dataset saved to 'phylo_eigenvectors_with_lifespan.csv' with metadata, eigenvectors, and Average_lifespan_days.")

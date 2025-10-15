@@ -1,0 +1,4 @@
+The input file of 02_01_01_dinucleotide_rates_reshape_for_elasticnet_Github_check.py: "filtered_species_with_zero_lifecycle_6_categories_Github_check.csv" is the modified file of the output from 05_04_09_extract_all_zero_lifehistory_in_6_categories.py in the repository: https://github.com/YuikiKondo/protostome_lifespan_DNA_mechanics.
+
+This modification is the exclusion of three species (Magicicada septendecula, Macrobrachium hainanense and Eledone cirrhosa).
+Because BUSCO predictions with Augustus failed in these three species, these species were excluded for fair comparisons in Figure 3a (to use the same Train/Test dataset).

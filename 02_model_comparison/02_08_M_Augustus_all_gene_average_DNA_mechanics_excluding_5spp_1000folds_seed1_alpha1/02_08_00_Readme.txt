@@ -1,0 +1,5 @@
+The three input files of 02_08_01_di_tri_tetra_mechanics_combine.py: filtered_species_with_all_indexes_Github_check.csv are the output from 
+07_05_18_DNA_mechanics_calc.py
+07_06_18_DNA_mechanics_calc.py
+07_07_18_DNA_mechanics_calc.py 
+in the repository: https://github.com/YuikiKondo/protostome_lifespan_DNA_mechanics.

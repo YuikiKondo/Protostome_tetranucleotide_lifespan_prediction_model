@@ -1,0 +1,8 @@
+The three input files of 02_07_01_di_tri_tetra_mechanics_combine.py: filtered_species_with_all_indexes_Github_check.csv are the output from 
+05_04_18_DNA_mechanics_calc.py
+05_05_18_DNA_mechanics_calc.py
+05_06_18_DNA_mechanics_calc.py 
+in the repository: https://github.com/YuikiKondo/protostome_lifespan_DNA_mechanics.
+
+
+Three species (Magicicada septendecula, Macrobrachium hainanense and Eledone cirrhosa) were excluded for fair comparisons in Figure 3a (to use the same Train/Test dataset).

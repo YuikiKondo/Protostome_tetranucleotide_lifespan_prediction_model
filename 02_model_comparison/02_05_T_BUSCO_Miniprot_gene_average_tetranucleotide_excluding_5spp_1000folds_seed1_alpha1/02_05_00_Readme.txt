@@ -1,0 +1,3 @@
+The input file of 02_05_01_tetranucleotide_rates_reshape_for_elasticnet_Github_check.py: "filtered_species_with_zero_lifecycle_6_categories_Github_check.csv" is the output from 05_08_09_extract_all_zero_lifehistory_in_6_categories.py in the repository: https://github.com/YuikiKondo/protostome_lifespan_DNA_mechanics.
+
+Three species (Magicicada septendecula, Macrobrachium hainanense and Eledone cirrhosa) were excluded for fair comparisons in Figure 3a (to use the same Train/Test dataset).
