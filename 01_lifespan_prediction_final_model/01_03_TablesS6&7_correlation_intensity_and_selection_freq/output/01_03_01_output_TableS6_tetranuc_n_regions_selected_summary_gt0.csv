@@ -1,0 +1,7 @@
+n_regions_selected,n_tetranucs,label,prop
+0,38,none of 5 regions,0.1484375
+1,58,only 1 region,0.2265625
+2,74,2 regions,0.2890625
+3,42,3 regions,0.1640625
+4,32,4 regions,0.125
+5,12,all 5 regions,0.046875

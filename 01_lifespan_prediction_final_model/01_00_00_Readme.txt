@@ -1,0 +1,2 @@
+The input file "filtered_species_with_zero_lifecycle_6_categories_Github_check.csv" is the output from 05_06_09_extract_all_zero_lifehistory_in_6_categories.py in another Repository: https://github.com/YuikiKondo/protostome_lifespan_DNA_mechanics.
+

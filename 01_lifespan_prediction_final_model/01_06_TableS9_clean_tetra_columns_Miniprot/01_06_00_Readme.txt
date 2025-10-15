@@ -1,0 +1,5 @@
+This process is only for extracting dataset for TableS9.
+"upstream1" and "downstream1" columns are removed, and "upstream2" and "downstream2" columns are renamed into "upstream" and "downstream", respectively in this process because we only used the latter regions, which had the strongest lifespan-related signals, for lifespan prediction.
+
+The input files "data_definitive_test.csv" and "data_definitive_train.csv" are the output from 01_00_03_Train_Test_representative_split.R.
+

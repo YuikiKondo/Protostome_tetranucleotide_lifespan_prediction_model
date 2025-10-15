@@ -1,0 +1,7 @@
+"Level","n","median_slope","mean_slope","mean_mse","wilcox_W","wilcox_p_value","test_description"
+"Protostomia",1,0.549458718325906,0.549458718325906,1.12870474129645,NA,NA,"Wilcoxon signed-rank test (median slope > 0, one-sided)"
+"Phylum",5,0.493878545394786,0.462019969506517,1.30173358689192,15,0.03125,"Wilcoxon signed-rank test (median slope > 0, one-sided)"
+"Class",15,0.395850955447566,0.299620309369815,1.2258318419263,102,0.007537841796875,"Wilcoxon signed-rank test (median slope > 0, one-sided)"
+"Order",46,0.194873169151252,0.174337408677799,1.02147588019375,946,1.03722686617402e-06,"Wilcoxon signed-rank test (median slope > 0, one-sided)"
+"Family",51,0.0144017428449522,-0.0148818609357387,1.05952870442288,718,0.304726666309152,"Wilcoxon signed-rank test (median slope > 0, one-sided)"
+"Genus",22,0.032990160111174,-0.179139940882741,0.955151650165809,136,0.387264490127563,"Wilcoxon signed-rank test (median slope > 0, one-sided)"
