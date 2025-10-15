@@ -1,0 +1,3 @@
+Dataset,n,Mean_Abs_Error_years,Median_Abs_Error_years,Mean_Rel_Error_pct_log_units,Median_Rel_Error_pct_log_units
+Spiralia (Train),240,7.84581425839529,1.5119911067893765,10.770101401990875,7.772347128215893
+Ecdysozoa (Test),229,3.2422654553363026,1.542990584839235,33.16707370126562,20.37373070053722
